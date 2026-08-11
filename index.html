@@ -7,12 +7,14 @@
   <title>IPTV Player</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
   <style>
-    :root { color-scheme: dark; --bg:#050505; --panel:#101010; --border:#242424; --muted:#8c8c8c; --text:#f5f5f5; }
+    :root { color-scheme: dark; --bg:#050505; --border:#242424; --muted:#8c8c8c; --text:#f5f5f5; }
     * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .app { min-height:100vh; display:grid; grid-template-columns:360px 1fr; } aside { border-right:1px solid var(--border); background:#090909; display:flex; flex-direction:column; min-width:0; }
     header { padding:18px; border-bottom:1px solid var(--border); } .brand { font-weight:800; font-size:20px; margin-bottom:14px; }
     .search { width:100%; background:#151515; border:1px solid var(--border); color:white; border-radius:10px; padding:11px 12px; outline:none; }
-    .filters { display:flex; gap:7px; margin-top:10px; } select { flex:1; min-width:0; background:#151515; color:#ddd; border:1px solid var(--border); border-radius:9px; padding:9px; }
+    .filters { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:10px; } .filter-label { display:block; min-width:0; }
+    .filter-label span { display:block; color:#777; font-size:10px; margin:0 0 5px 2px; text-transform:uppercase; letter-spacing:.06em; }
+    select { width:100%; min-width:0; background:#151515; color:#ddd; border:1px solid var(--border); border-radius:9px; padding:9px; }
     #count { color:var(--muted); font-size:12px; margin-top:10px; } #channels { overflow:auto; padding:8px; flex:1; }
     .channel { width:100%; display:flex; align-items:center; gap:11px; border:0; background:transparent; color:white; padding:10px; border-radius:9px; text-align:left; cursor:pointer; }
     .channel:hover,.channel.active { background:#191919; } .logo { width:42px; height:30px; object-fit:contain; background:#151515; border-radius:5px; flex:0 0 42px; }
@@ -26,25 +28,28 @@
   </style>
 </head>
 <body>
-<div class="app"><aside><header><div class="brand">IPTV Player</div><input id="search" class="search" placeholder="Search channels..." autocomplete="off" /><div class="filters"><select id="country"><option value="">All countries</option></select><select id="group"><option value="">All categories</option></select></div><div id="count">Loading channel database...</div></header><div id="channels"></div></aside><main><div class="topbar"><div id="now"><strong>Select a channel</strong><div id="status">Loading public IPTV data</div></div><div class="controls"><button id="mute">Unmute</button><button id="fullscreen">Fullscreen</button></div></div><div class="video-wrap"><video id="video" controls playsinline></video><div id="empty" class="empty">Choose a channel to start watching.</div></div></main></div>
+<div class="app"><aside><header><div class="brand">IPTV Player</div><input id="search" class="search" placeholder="Search channels..." autocomplete="off" /><div class="filters"><label class="filter-label"><span>Country</span><select id="country"><option value="">All countries</option></select></label><label class="filter-label"><span>Language</span><select id="language"><option value="">All languages</option></select></label><label class="filter-label"><span>Category</span><select id="group"><option value="">All categories</option></select></label></div><div id="count">Loading channel database...</div></header><div id="channels"></div></aside><main><div class="topbar"><div id="now"><strong>Select a channel</strong><div id="status">Loading public IPTV data</div></div><div class="controls"><button id="mute">Unmute</button><button id="fullscreen">Fullscreen</button></div></div><div class="video-wrap"><video id="video" controls playsinline></video><div id="empty" class="empty">Choose a channel to start watching.</div></div></main></div>
 <script>
 const API='https://iptv-org.github.io/api';
 const params=new URLSearchParams(location.search);
 const STREAMS_URL=params.get('streams')||`${API}/streams.json`;
 const CHANNELS_URL=params.get('channels')||`${API}/channels.json`;
-const video=document.getElementById('video'),channelsEl=document.getElementById('channels'),searchEl=document.getElementById('search'),countryEl=document.getElementById('country'),groupEl=document.getElementById('group'),countEl=document.getElementById('count'),nowEl=document.getElementById('now'),emptyEl=document.getElementById('empty');
+const LANGUAGES_URL=params.get('languages')||`${API}/languages.json`;
+const video=document.getElementById('video'),channelsEl=document.getElementById('channels'),searchEl=document.getElementById('search'),countryEl=document.getElementById('country'),languageEl=document.getElementById('language'),groupEl=document.getElementById('group'),countEl=document.getElementById('count'),nowEl=document.getElementById('now'),emptyEl=document.getElementById('empty');
 let channels=[],hls=null,activeUrl='';
 const countryNames=new Intl.DisplayNames(['en'],{type:'region'});
+const languageNames=new Intl.DisplayNames(['en'],{type:'language'});
 function countryName(code){try{return countryNames.of(code)||code}catch{return code||''}}
+function languageName(code){try{return languageNames.of(code)||code}catch{return code||''}}
 function categoryName(id){return String(id||'').replace(/[-_]/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function fillSelect(el,values,label){const old=el.value;el.innerHTML='<option value="">'+label+'</option>';[...new Set(values.filter(Boolean))].sort((a,b)=>a.localeCompare(b)).forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;el.appendChild(o)});el.value=old}
 function render(){
- const q=searchEl.value.toLowerCase().trim(),country=countryEl.value,group=groupEl.value;
- const filtered=channels.filter(c=>(!q||c.name.toLowerCase().includes(q)||c.id.toLowerCase().includes(q))&&(!country||c.country===country)&&(!group||c.categories.includes(group)));
+ const q=searchEl.value.toLowerCase().trim(),country=countryEl.value,language=languageEl.value,group=groupEl.value;
+ const filtered=channels.filter(c=>(!q||c.name.toLowerCase().includes(q)||c.id.toLowerCase().includes(q))&&(!country||c.countryName===country)&&(!language||c.languages.includes(language))&&(!group||c.categories.some(x=>categoryName(x)===group)));
  countEl.textContent=`${filtered.length.toLocaleString()} channels`;
  channelsEl.innerHTML=''; const frag=document.createDocumentFragment();
- filtered.slice(0,2000).forEach(c=>{const b=document.createElement('button');b.className='channel'+(c.url===activeUrl?' active':'');b.innerHTML=`<img class="logo" loading="lazy" src="${esc(c.logo)}" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(c.name)}</div><div class="meta">${esc(c.categories.map(categoryName).join(' • ')||c.countryName||'Live')}</div></div>`;b.onclick=()=>play(c);frag.appendChild(b)}); channelsEl.appendChild(frag);
+ filtered.slice(0,2000).forEach(c=>{const b=document.createElement('button');b.className='channel'+(c.url===activeUrl?' active':'');b.innerHTML=`<img class="logo" loading="lazy" src="${esc(c.logo)}" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(c.name)}</div><div class="meta">${esc(c.languages.join(' • ')||c.categories.map(categoryName).join(' • ')||c.countryName||'Live')}</div></div>`;b.onclick=()=>play(c);frag.appendChild(b)}); channelsEl.appendChild(frag);
 }
 function setStatus(text,error=false){const s=document.getElementById('status');if(s){s.textContent=text;s.className=error?'error':''}}
 function play(c){
@@ -58,29 +63,26 @@ async function getJson(url){const res=await fetch(url,{cache:'no-store'});if(!re
 async function load(){
  try{
   setStatus('Loading channel metadata...');
-  const [channelData,streamData]=await Promise.all([getJson(CHANNELS_URL),getJson(STREAMS_URL)]);
+  const [channelData,streamData,languageData]=await Promise.all([getJson(CHANNELS_URL),getJson(STREAMS_URL),getJson(LANGUAGES_URL)]);
   const byId=new Map(channelData.map(c=>[c.id,c]));
+  const languageByCode=new Map(languageData.map(l=>[l.code,l.name]));
   const logoBase='https://iptv-org.github.io/iptv/logos/';
   channels=[];
   for(const s of streamData){
    const meta=byId.get(s.channel); if(!meta||!s.url)continue;
-   channels.push({id:meta.id,name:meta.name||meta.id,url:s.url,country:meta.country||'',countryName:countryName(meta.country),categories:Array.isArray(meta.categories)?meta.categories:[],logo:`${logoBase}${encodeURIComponent(meta.id)}.png`});
+   const languageCodes=Array.isArray(meta.languages)?meta.languages:[];
+   const languages=languageCodes.map(code=>languageByCode.get(code)||languageName(code)||code).filter(Boolean);
+   channels.push({id:meta.id,name:meta.name||meta.id,url:s.url,country:meta.country||'',countryName:countryName(meta.country),languages,categories:Array.isArray(meta.categories)?meta.categories:[],logo:`${logoBase}${encodeURIComponent(meta.id)}.png`});
   }
   const seen=new Set(); channels=channels.filter(c=>{const k=c.id+'|'+c.url;if(seen.has(k))return false;seen.add(k);return true});
   if(!channels.length)throw new Error('No playable channels found');
   fillSelect(countryEl,channels.map(c=>c.countryName),'All countries');
-  const cats=[...new Set(channels.flatMap(c=>c.categories.map(categoryName)))];
-  fillSelect(groupEl,cats,'All categories');
-  groupEl.dataset.raw='1';
+  fillSelect(languageEl,channels.flatMap(c=>c.languages),'All languages');
+  fillSelect(groupEl,channels.flatMap(c=>c.categories.map(categoryName)),'All categories');
   render(); setStatus(`${channels.length.toLocaleString()} playable streams loaded`);
  }catch(e){countEl.textContent='Could not load channel data';setStatus(e.message,true);console.error(e)}
 }
-searchEl.oninput=render; countryEl.onchange=()=>{const selected=countryEl.value;render()};
-groupEl.onchange=render;
-// The visible category option stores its display name; filtering compares against display names.
-const originalRender=render;
-render=function(){const q=searchEl.value.toLowerCase().trim(),country=countryEl.value,group=groupEl.value;const filtered=channels.filter(c=>(!q||c.name.toLowerCase().includes(q)||c.id.toLowerCase().includes(q))&&(!country||c.countryName===country)&&(!group||c.categories.some(x=>categoryName(x)===group)));countEl.textContent=`${filtered.length.toLocaleString()} channels`;channelsEl.innerHTML='';const frag=document.createDocumentFragment();filtered.slice(0,2000).forEach(c=>{const b=document.createElement('button');b.className='channel'+(c.url===activeUrl?' active':'');b.innerHTML=`<img class="logo" loading="lazy" src="${esc(c.logo)}" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(c.name)}</div><div class="meta">${esc(c.categories.map(categoryName).join(' • ')||c.countryName||'Live')}</div></div>`;b.onclick=()=>play(c);frag.appendChild(b)});channelsEl.appendChild(frag)};
-
+searchEl.oninput=render; countryEl.onchange=render; languageEl.onchange=render; groupEl.onchange=render;
 document.getElementById('mute').onclick=()=>{video.muted=!video.muted;document.getElementById('mute').textContent=video.muted?'Unmute':'Mute'};
 document.getElementById('fullscreen').onclick=()=>{const w=document.querySelector('.video-wrap');if(w.requestFullscreen)w.requestFullscreen()};
 load();
