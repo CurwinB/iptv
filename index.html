@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#050505" />
+  <title>IPTV Player</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg:#050505; --panel:#101010; --border:#242424; --muted:#8c8c8c; --text:#f5f5f5; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .app { min-height:100vh; display:grid; grid-template-columns:360px 1fr; } aside { border-right:1px solid var(--border); background:#090909; display:flex; flex-direction:column; min-width:0; }
+    header { padding:18px; border-bottom:1px solid var(--border); } .brand { font-weight:800; font-size:20px; margin-bottom:14px; }
+    .search { width:100%; background:#151515; border:1px solid var(--border); color:white; border-radius:10px; padding:11px 12px; outline:none; }
+    .filters { display:flex; gap:7px; margin-top:10px; } select { flex:1; background:#151515; color:#ddd; border:1px solid var(--border); border-radius:9px; padding:9px; }
+    #count { color:var(--muted); font-size:12px; margin-top:10px; } #channels { overflow:auto; padding:8px; flex:1; }
+    .channel { width:100%; display:flex; align-items:center; gap:11px; border:0; background:transparent; color:white; padding:10px; border-radius:9px; text-align:left; cursor:pointer; }
+    .channel:hover,.channel.active { background:#191919; } .logo { width:42px; height:30px; object-fit:contain; background:#151515; border-radius:5px; flex:0 0 42px; }
+    .name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; } .meta { color:#777; font-size:10px; margin-top:3px; }
+    main { min-width:0; display:flex; flex-direction:column; } .topbar { padding:16px 22px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:15px; }
+    #now { min-width:0; } #now strong { display:block; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } #status { color:var(--muted); font-size:12px; margin-top:4px; }
+    .controls { display:flex; gap:8px; } button { border:1px solid var(--border); background:#151515; color:#ddd; border-radius:8px; padding:9px 12px; cursor:pointer; } button:hover { background:#202020; }
+    .video-wrap { position:relative; background:#000; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; } video { width:100%; height:100%; max-height:calc(100vh - 82px); object-fit:contain; background:#000; }
+    .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#777; text-align:center; padding:30px; pointer-events:none; } .error { color:#ff8b8b !important; }
+    @media(max-width:850px) { .app { grid-template-columns:1fr; grid-template-rows:52vh 48vh; } aside { order:2; border-right:0; border-top:1px solid var(--border); } main { order:1; } video { max-height:52vh; } .topbar { padding:11px 14px; } }
+  </style>
+</head>
+<body>
+<div class="app"><aside><header><div class="brand">IPTV Player</div><input id="search" class="search" placeholder="Search channels..." autocomplete="off" /><div class="filters"><select id="country"><option value="">All countries</option></select><select id="group"><option value="">All categories</option></select></div><div id="count">Loading playlist...</div></header><div id="channels"></div></aside><main><div class="topbar"><div id="now"><strong>Select a channel</strong><div id="status">Loading public playlist</div></div><div class="controls"><button id="mute">Unmute</button><button id="fullscreen">Fullscreen</button></div></div><div class="video-wrap"><video id="video" controls playsinline></video><div id="empty" class="empty">Choose a channel to start watching.</div></div></main></div>
+<script>
+const DEFAULT_PLAYLIST='https://iptv-org.github.io/iptv/streams/us.m3u'; const params=new URLSearchParams(location.search); const PLAYLIST=params.get('playlist')||DEFAULT_PLAYLIST;
+const video=document.getElementById('video'),channelsEl=document.getElementById('channels'),searchEl=document.getElementById('search'),countryEl=document.getElementById('country'),groupEl=document.getElementById('group'),countEl=document.getElementById('count'),nowEl=document.getElementById('now'),emptyEl=document.getElementById('empty'); let channels=[],hls=null,activeUrl='';
+function attr(line,key){const m=line.match(new RegExp(key+'="([^"]*)"'));return m?m[1]:''}
+function parseM3U(text){const lines=text.split(/\r?\n/).map(x=>x.trim()),out=[];for(let i=0;i<lines.length;i++){if(!lines[i].startsWith('#EXTINF'))continue;const url=lines[i+1]&&!lines[i+1].startsWith('#')?lines[i+1]:'';if(!url)continue;const comma=lines[i].indexOf(',');const title=comma>=0?lines[i].slice(comma+1).trim():'Unknown channel';out.push({title,url,id:attr(lines[i],'tvg-id'),logo:attr(lines[i],'tvg-logo'),group:attr(lines[i],'group-title'),country:attr(lines[i],'tvg-country')})}return out}
+function fillSelect(el,values,label){const old=el.value;el.innerHTML='<option value="">'+label+'</option>';[...new Set(values.filter(Boolean))].sort().forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;el.appendChild(o)});el.value=old}
+function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function render(){const q=searchEl.value.toLowerCase().trim(),country=countryEl.value,group=groupEl.value,filtered=channels.filter(c=>(!q||c.title.toLowerCase().includes(q)||c.id.toLowerCase().includes(q))&&(!country||c.country===country)&&(!group||c.group===group));countEl.textContent=`${filtered.length.toLocaleString()} channels`;channelsEl.innerHTML='';const frag=document.createDocumentFragment();filtered.slice(0,1500).forEach(c=>{const b=document.createElement('button');b.className='channel'+(c.url===activeUrl?' active':'');b.innerHTML=`<img class="logo" loading="lazy" src="${esc(c.logo)}" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(c.title)}</div><div class="meta">${esc(c.group||c.country||'Live')}</div></div>`;b.onclick=()=>play(c);frag.appendChild(b)});channelsEl.appendChild(frag)}
+function setStatus(text,error=false){const s=document.getElementById('status');if(s){s.textContent=text;s.className=error?'error':''}}
+function play(c){activeUrl=c.url;emptyEl.style.display='none';nowEl.innerHTML=`<strong>${esc(c.title)}</strong><div id="status">Connecting...</div>`;render();if(hls){hls.destroy();hls=null}video.pause();video.removeAttribute('src');if(video.canPlayType('application/vnd.apple.mpegurl')){video.src=c.url;video.play().catch(()=>{});setStatus('Playing');return}if(window.Hls&&Hls.isSupported()){hls=new Hls({enableWorker:true,lowLatencyMode:false});hls.loadSource(c.url);hls.attachMedia(video);hls.on(Hls.Events.MANIFEST_PARSED,()=>{setStatus('Playing');video.play().catch(()=>{})});hls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)setStatus('Stream unavailable or blocked',true)})}else setStatus('This browser does not support HLS',true)}
+async function load(){try{const res=await fetch(PLAYLIST,{cache:'no-store'});if(!res.ok)throw new Error(`HTTP ${res.status}`);channels=parseM3U(await res.text());if(!channels.length)throw new Error('No channels found');fillSelect(countryEl,channels.map(c=>c.country),'All countries');fillSelect(groupEl,channels.map(c=>c.group),'All categories');render();setStatus(`${channels.length.toLocaleString()} channels loaded`)}catch(e){countEl.textContent='Could not load playlist';setStatus(e.message,true)}}
+searchEl.oninput=render;countryEl.onchange=render;groupEl.onchange=render;document.getElementById('mute').onclick=()=>{video.muted=!video.muted;document.getElementById('mute').textContent=video.muted?'Unmute':'Mute'};document.getElementById('fullscreen').onclick=()=>{const w=document.querySelector('.video-wrap');if(w.requestFullscreen)w.requestFullscreen()};load();
+</script></body></html>
